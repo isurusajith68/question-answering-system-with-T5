@@ -90,7 +90,6 @@ const FileUpload = () => {
               .then(({ done, value }) => {
                 if (done) {
                   controller.close();
-                  // Set loading to false only after the stream is fully processed
                   setLoading(false);
                   return;
                 }
@@ -109,15 +108,15 @@ const FileUpload = () => {
 
                   if (qaArray.length === 0) {
                     setError("Failed to parse JSON response.");
-                    setLoading(false); // Ensure this only happens when there's an error
+                    setLoading(false);
                     return;
                   }
 
                   setQaPairs((prev) => [...prev, ...qaArray]);
-                  result = ""; // Reset the result buffer after processing data
+                  result = ""; 
                 }
 
-                push(); // Keep reading until stream is done
+                push(); 
               })
               .catch((err) => {
                 console.error("Error reading the stream:", err);
@@ -125,11 +124,11 @@ const FileUpload = () => {
                 setLoading(false);
               });
           }
-          push(); // Start the reading process
+          push(); 
         },
       });
 
-      await new Response(stream); // Await the completion of the streaming process
+      await new Response(stream);
     } catch (err) {
       console.error("File upload failed:", err);
       setError(err.message || "An error occurred while processing the file.");
@@ -140,12 +139,23 @@ const FileUpload = () => {
   const renderQA = (qa, index) => {
     if (qa && qa.question) {
       return (
-        <div key={index}>
+        <div
+          key={index}
+          style={{
+            marginBottom: "20px",
+            padding: "10px",
+            border: "1px solid #ddd",
+            borderRadius: "8px",
+            backgroundColor: "#fafafa",
+          }}
+        >
           <h3
             style={{
               backgroundColor: "#f4f4f4",
               padding: "5px",
               borderRadius: "5px",
+              fontSize: "16px",
+              marginBottom: "10px",
             }}
           >
             <span>
@@ -153,11 +163,17 @@ const FileUpload = () => {
             </span>
             {qa.question}
           </h3>
-          <ul>
+          <ul style={{ listStyleType: "none", paddingLeft: "0" }}>
             {qa.options &&
               qa.options.map((option, i) => (
-                <li key={i}>
-                  <label>
+                <li key={i} style={{ marginBottom: "10px" }}>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      fontSize: "14px",
+                    }}
+                  >
                     <input
                       type="radio"
                       name={`question-${index}`}
@@ -174,6 +190,7 @@ const FileUpload = () => {
                         })
                       }
                       style={{
+                        marginRight: "10px",
                         accentColor: i === qa.answer - 1 ? "green" : "red",
                       }}
                     />
@@ -186,6 +203,7 @@ const FileUpload = () => {
                         style={{
                           color: i === qa.answer - 1 ? "green" : "red",
                           marginLeft: "5px",
+                          fontSize: "14px",
                         }}
                       >
                         {i === qa.answer - 1 ? "Correct" : "Incorrect"}
@@ -201,18 +219,66 @@ const FileUpload = () => {
   };
 
   return (
-    <div>
-      <h2>Upload PDF for QA Generation</h2>
-      <form onSubmit={handleSubmit}>
-        <input type="file" accept=".pdf" onChange={handleFileChange} />
-        <button type="submit">Submit</button>
+    <div
+      style={{
+        padding: "20px",
+        border: "1px solid #ccc",
+        maxWidth: "500px",
+        margin: "0 auto",
+      }}
+    >
+      <h2 style={{ textAlign: "center", color: "#333" }}>
+        Upload PDF for QA Generation
+      </h2>
+      <form
+        onSubmit={handleSubmit}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+        }}
+      >
+        <input
+          type="file"
+          accept=".pdf"
+          onChange={handleFileChange}
+          style={{
+            marginBottom: "10px",
+            padding: "8px",
+            border: "1px solid #ccc",
+            width: "100%",
+            maxWidth: "400px",
+          }}
+        />
+        <button
+          type="submit"
+          style={{
+            padding: "10px 20px",
+            backgroundColor: "#4CAF50",
+            color: "white",
+            border: "none",
+            cursor: "pointer",
+            width: "100%",
+            maxWidth: "400px",
+          }}
+        >
+          Submit
+        </button>
       </form>
-    
-      {error && <p style={{ color: "red" }}>{error}</p>}
-      {qaPairs && qaPairs.length > 0 && (
-        <div>{qaPairs.map((qa, index) => renderQA(qa, index))}</div>
+
+      {error && (
+        <p style={{ color: "red", textAlign: "center", fontSize: "14px" }}>
+          {error}
+        </p>
       )}
-      {loading && <p>Loading...</p>}
+      {qaPairs && qaPairs.length > 0 && (
+        <div style={{ marginTop: "20px" }}>
+          {qaPairs.map((qa, index) => renderQA(qa, index))}
+        </div>
+      )}
+      {loading && (
+        <p style={{ textAlign: "center", color: "#777" }}>Loading...</p>
+      )}
     </div>
   );
 };
