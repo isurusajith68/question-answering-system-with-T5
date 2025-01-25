@@ -1,0 +1,82 @@
+[
+  {
+    "context": "Cloud computing refers to the delivery of computing services over the internet, including storage, databases, servers, networking, software, and analytics. It provides on-demand resources and allows users to pay only for what they use.",
+    "output": "Question: What does cloud computing primarily offer?\nOptions:\nA) Delivery of physical hardware\nB) Delivery of computing services over the internet\nC) Delivery of desktop applications offline\nD) Delivery of hardware troubleshooting tools\nAnswer: B"
+  },
+  {
+    "context": "One of the major benefits of cloud computing is scalability. It allows businesses to scale their resources up or down based on demand, ensuring cost efficiency and operational flexibility.",
+    "output": "Question: Which key benefit of cloud computing allows businesses to adjust resources based on demand?\nOptions:\nA) Security\nB) Scalability\nC) Reliability\nD) Affordability\nAnswer: B"
+  },
+  {
+    "context": "Public cloud is a type of cloud computing where services are provided by third-party vendors and shared among multiple organizations. It is often more cost-effective but may raise concerns about data privacy.",
+    "output": "Question: What is a characteristic of public cloud computing?\nOptions:\nA) Exclusively used by a single organization\nB) Provided by third-party vendors and shared among multiple organizations\nC) Requires on-premises infrastructure\nD) Limited to private data centers only\nAnswer: B"
+  },
+  {
+    "context": "Software as a Service (SaaS) is a cloud computing model that delivers software applications over the internet. Users can access these applications via a web browser without needing to install or maintain them.",
+    "output": "Question: What does SaaS in cloud computing provide?\nOptions:\nA) Virtual hardware\nB) Software applications accessible via the internet\nC) Data storage solutions\nD) Networking services\nAnswer: B"
+  },
+  {
+    "context": "Infrastructure as a Service (IaaS) is a cloud computing model that provides virtualized computing resources such as virtual machines, storage, and networking on a pay-as-you-go basis.",
+    "output": "Question: Which cloud computing model provides virtualized computing resources like storage and networking?\nOptions:\nA) SaaS\nB) PaaS\nC) IaaS\nD) FaaS\nAnswer: C"
+  },
+  {
+    "context": "Hybrid cloud combines private and public cloud infrastructures to enable data and application portability. It offers flexibility by allowing businesses to move workloads between private and public clouds as needed.",
+    "output": "Question: What is a hybrid cloud?\nOptions:\nA) A completely private cloud infrastructure\nB) A combination of private and public clouds\nC) A public cloud with no data portability\nD) A cloud limited to a single data center\nAnswer: B"
+  },
+  {
+    "context": "Platform as a Service (PaaS) provides a platform that allows developers to build, deploy, and manage applications without dealing with underlying infrastructure.",
+    "output": "Question: What does PaaS in cloud computing allow developers to do?\nOptions:\nA) Access raw hardware resources\nB) Build, deploy, and manage applications\nC) Install operating systems\nD) Manage physical servers\nAnswer: B"
+  },
+  {
+    "context": "Cloud storage is a service that allows users to store data on remote servers accessed via the internet. It ensures data accessibility and provides backup solutions.",
+    "output": "Question: What does cloud storage primarily provide?\nOptions:\nA) Local data storage on physical devices\nB) Data storage on remote servers accessible via the internet\nC) Only temporary data storage\nD) Storage on private, offline devices\nAnswer: B"
+  },
+  {
+    "context": "Serverless computing is a cloud computing execution model where the cloud provider dynamically manages the allocation of resources. Developers only need to focus on writing code.",
+    "output": "Question: What is a key feature of serverless computing?\nOptions:\nA) Manual resource allocation\nB) Dynamic resource management by the cloud provider\nC) Installing and managing physical servers\nD) Full control of hardware resources\nAnswer: B"
+  },
+  {
+    "context": "Cloud computing reduces the need for capital expenditure by allowing businesses to pay for only the resources they use, turning fixed costs into variable costs.",
+    "output": "Question: How does cloud computing impact capital expenditure for businesses?\nOptions:\nA) Increases fixed costs\nB) Converts fixed costs into variable costs\nC) Requires upfront investments in hardware\nD) Reduces operating flexibility\nAnswer: B"
+  },
+  {
+    "context": "The main deployment models of cloud computing are public cloud, private cloud, and hybrid cloud. Each model serves different needs based on privacy, cost, and scalability requirements.",
+    "output": "Question: Which of the following is a cloud computing deployment model?\nOptions:\nA) Static cloud\nB) Private cloud\nC) Distributed cloud\nD) Fixed cloud\nAnswer: B"
+  },
+  {
+    "context": "Virtualization is a foundational technology in cloud computing. It enables the creation of virtual resources like servers, networks, and storage, allowing efficient resource utilization.",
+    "output": "Question: What is the role of virtualization in cloud computing?\nOptions:\nA) It creates physical resources\nB) It creates virtual resources for efficient utilization\nC) It eliminates the need for resource sharing\nD) It restricts scalability\nAnswer: B"
+  },
+  {
+    "context": "Edge computing complements cloud computing by processing data closer to the source, reducing latency and bandwidth usage.",
+    "output": "Question: How does edge computing complement cloud computing?\nOptions:\nA) By centralizing data processing\nB) By processing data closer to the source\nC) By eliminating cloud storage\nD) By restricting scalability\nAnswer: B"
+  },
+  {
+    "context": "Data privacy is a significant concern in cloud computing. Providers implement encryption and strict access controls to protect sensitive information.",
+    "output": "Question: What measures are commonly used to ensure data privacy in cloud computing?\nOptions:\nA) Data redundancy and mirroring\nB) Encryption and strict access controls\nC) Reduced access permissions\nD) Public cloud sharing\nAnswer: B"
+  },
+  {
+    "context": "Disaster recovery in cloud computing ensures business continuity by providing backup and recovery solutions that minimize downtime during a system failure.",
+    "output": "Question: What does disaster recovery in cloud computing aim to achieve?\nOptions:\nA) Increased system downtime\nB) Backup and recovery to ensure business continuity\nC) Limited data access during failures\nD) Permanent data loss prevention\nAnswer: B"
+  },
+  {
+    "context": "Cloud providers typically offer three service models: IaaS, PaaS, and SaaS, each catering to different levels of abstraction and user needs.",
+    "output": "Question: What are the three main service models in cloud computing?\nOptions:\nA) IaaS, SaaS, and HaaS\nB) IaaS, PaaS, and SaaS\nC) SaaS, FaaS, and HaaS\nD) PaaS, DaaS, and SaaS\nAnswer: B"
+  },
+  {
+    "context": "Elasticity in cloud computing refers to the ability to dynamically scale resources up or down based on demand.",
+    "output": "Question: What does elasticity in cloud computing mean?\nOptions:\nA) Fixed resource allocation\nB) Dynamic scaling of resources based on demand\nC) Manual adjustment of resources\nD) Limited scalability\nAnswer: B"
+  },
+  {
+    "context": "A Virtual Private Cloud (VPC) is a private section of a public cloud that provides additional security and control for an organization's data and applications.",
+    "output": "Question: What is a Virtual Private Cloud (VPC)?\nOptions:\nA) A fully public cloud\nB) A private section of a public cloud\nC) A dedicated private data center\nD) A cloud with no security features\nAnswer: B"
+  },
+  {
+    "context": "High availability in cloud computing ensures systems remain operational and accessible even during hardware or software failures.",
+    "output": "Question: What does high availability in cloud computing ensure?\nOptions:\nA) Increased downtime during failures\nB) Systems remain operational and accessible\nC) Reduced scalability\nD) Single-point failure tolerance\nAnswer: B"
+  },
+  {
+    "context": "Multi-cloud refers to the use of multiple cloud service providers to meet various business needs, avoiding reliance on a single provider.",
+    "output": "Question: What is multi-cloud in cloud computing?\nOptions:\nA) Using a single cloud provider\nB) Using multiple cloud providers\nC) Using private clouds only\nD) Using hybrid clouds exclusively\nAnswer: B"
+  }
+]
