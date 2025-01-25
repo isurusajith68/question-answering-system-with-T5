@@ -4,14 +4,8 @@ const FileUpload = () => {
   const [file, setFile] = useState(null);
   const [qaPairs, setQaPairs] = useState([
     {
-      question:
-        "The rise of automation and robotics is another major technological trend that is reshaping industries around the world.",
-      options: [
-        "Robots will replace all human jobs.",
-        "Automation will lead to increased productivity and efficiency.",
-        "Robotics and automation will revolutionize manufacturing and agriculture.",
-        "The rise of automation and robotics will have no impact on the job market",
-      ],
+      question: "What is the capital of France?",
+      options: ["Paris", "London", "Berlin", "Madrid"],
       answer: 1,
     },
   ]);
