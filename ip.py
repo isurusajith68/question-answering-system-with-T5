@@ -162,6 +162,31 @@ def generate_qa():
         print(f"Error in /generate-qa route: {str(e)}")
         return jsonify({"error": "An error occurred while processing the file."}), 500
 
+# #preprocess the text
+# def preprocess_text(text):
+#     return text.replace("\n", " ").replace("\r", " ").replace("\t", " ").strip()
+
+# @app.route("/generate-mcq", methods=["POST"])
+# def generate_mcq():
+#     data = request.json
+
+#     if "chunk" not in data:
+#         return jsonify({"error": "Missing 'chunk' key in the request body"}), 400
+
+#     if "question" not in data:
+#         return jsonify({"error": "Missing 'question' key in the request body"}), 400
+
+#     chunk = preprocess_text(data["chunk"])
+#     question = preprocess_text(data["question"])
+
+#     try:
+#         mcq = get_mcq_prompt(chunk, question)
+#         return jsonify(mcq)
+#     except Exception as e:
+#         return jsonify({"error": str(e)}), 500
+
+
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
