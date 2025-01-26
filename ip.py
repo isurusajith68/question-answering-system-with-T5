@@ -8,6 +8,10 @@ from transformers import T5ForConditionalGeneration, T5Tokenizer
 import pdfplumber 
 from ollama import chat
 from prompts import get_mcq_prompt 
+from groq import Groq
+from dotenv import load_dotenv
+load_dotenv()
+api_key = os.environ.get("Groq_Api_Key")
 
 app = Flask(__name__)
 
@@ -15,6 +19,37 @@ CORS(app)
 
 model = T5ForConditionalGeneration.from_pretrained("./t5-qna")
 tokenizer = T5Tokenizer.from_pretrained("./t5-qna")
+
+
+client = Groq(
+    api_key=os.environ.get(api_key),
+)
+
+def predict_using_ollama_api_v1(chunk, question):
+    try:
+        messages = get_mcq_prompt(chunk, question)
+
+        completion = client.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=messages,
+            temperature=1,
+            max_tokens=1024,
+            top_p=1,
+            stream=True,
+            stop=None,
+        )
+
+        response = ""
+        for chunk in completion:
+            content = chunk.choices[0].delta.content or ""
+            # print(content, end="")  
+            response += content  
+
+        return response
+
+    except Exception as e:
+        return {"error": f"Error generating response: {str(e)}"}
+
 
 
 def predict_using_ollama(chunk, question):
@@ -93,7 +128,7 @@ def predict(context, query, model, tokenizer):
         raise
 
 
-def process_pdf_and_generate_questions_with_context_stream(pdf_path, model, tokenizer, max_context_length=1024):
+def process_pdf_and_generate_questions_with_context_stream(pdf_path, model, tokenizer, max_context_length=2048):
  
     try:
         text = extract_text_from_pdf(pdf_path)
@@ -103,12 +138,12 @@ def process_pdf_and_generate_questions_with_context_stream(pdf_path, model, toke
 
         chunks = [text[i:i + max_context_length] for i in range(0, len(text), max_context_length)]
 
-        for i, chunk in enumerate(chunks[:5]): 
+        for i, chunk in enumerate(chunks[:6]): 
             question = generate_questions(chunk, model, tokenizer)
 
             answer = predict(chunk, question, model, tokenizer)
 
-            refined_answer = predict_using_ollama(chunk, question)
+            refined_answer = predict_using_ollama_api_v1(chunk, question)
 
             yield refined_answer
 
@@ -184,6 +219,41 @@ def generate_qa():
 #         return jsonify(mcq)
 #     except Exception as e:
 #         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/test-groq", methods=["GET"])
+def test_groq():
+    try:
+        stream = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+                    "role": "user",
+                    "content": "how are you"
+                },
+                {
+                    "role": "assistant",
+                    "content": "I'm just a language model, so I don't have emotions or physical sensations like humans do. However, I'm functioning properly and ready to assist you with any questions or tasks you may have. How can I help you today?"
+                }
+            ],
+            temperature=1,
+            max_completion_tokens=1024,
+            top_p=1,
+            stream=True,
+            stop=None,
+        )
+
+        response_content = ""
+
+        for chunk in stream:
+            content = chunk.choices[0].delta.content or ""
+            response_content += content
+
+        return jsonify({"response": response_content}), 200
+    except Exception as e:
+        return jsonify({"error": f"Error generating response: {str(e)}"}), 500
+
+
 
 
 
