@@ -25,7 +25,7 @@ client = Groq(
     api_key=os.environ.get(api_key),
 )
 
-def predict_using_ollama_api_v1(chunk, question):
+def predict_using_llama_api_v1(chunk, question):
     try:
         messages = get_mcq_prompt(chunk, question)
 
@@ -143,7 +143,10 @@ def process_pdf_and_generate_questions_with_context_stream(pdf_path, model, toke
 
             answer = predict(chunk, question, model, tokenizer)
 
-            refined_answer = predict_using_ollama_api_v1(chunk, question)
+            # print("answer", answer)
+            print("question", question)
+
+            refined_answer = predict_using_llama_api_v1(chunk, question)
 
             yield refined_answer
 
