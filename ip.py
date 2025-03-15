@@ -10,6 +10,11 @@ from ollama import chat
 from prompts import get_mcq_prompt 
 from groq import Groq
 from dotenv import load_dotenv
+from pymongo import MongoClient
+client = MongoClient("mongodb://localhost:27017/") 
+db = client["qa_database"]
+collection = db["qa_collection"]
+
 load_dotenv()
 api_key = os.environ.get("Groq_Api_Key")
 
@@ -138,7 +143,7 @@ def process_pdf_and_generate_questions_with_context_stream(pdf_path, model, toke
 
         chunks = [text[i:i + max_context_length] for i in range(0, len(text), max_context_length)]
 
-        for i, chunk in enumerate(chunks[:6]): 
+        for i, chunk in enumerate(chunks[:10]): 
             question = generate_questions(chunk, model, tokenizer)
 
             answer = predict(chunk, question, model, tokenizer)
@@ -222,6 +227,28 @@ def generate_qa():
 #         return jsonify(mcq)
 #     except Exception as e:
 #         return jsonify({"error": str(e)}), 500
+
+@app.route("/save-qa", methods=["POST"])
+def generate_qa_save():
+    qa = request.json
+
+    if not isinstance(qa, list):
+        return jsonify({"error": "Invalid format. Expected a list of QA objects."}), 400
+
+    try:
+        result = collection.insert_many(qa)
+        return jsonify({"message": "QA saved successfully", "inserted_ids": str(result.inserted_ids)}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/get-qa", methods=["GET"])
+def get_qa():
+    try:
+        data = list(collection.find({}, {"_id": 0}))
+        return jsonify(data), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
 
 
 @app.route("/test-groq", methods=["GET"])

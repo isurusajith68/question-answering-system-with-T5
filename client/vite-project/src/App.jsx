@@ -1,4 +1,5 @@
 import { useState } from "react";
+import LoadQa from "./load-qa";
 
 const FileUpload = () => {
   const [file, setFile] = useState(null);
@@ -12,6 +13,7 @@ const FileUpload = () => {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selectedOption, setSelectedOption] = useState(null);
+  const [loadQa, setLoadQa] = useState(false);
   const handleFileChange = (e) => {
     setFile(e.target.files[0]);
   };
@@ -107,10 +109,10 @@ const FileUpload = () => {
                   }
 
                   setQaPairs((prev) => [...prev, ...qaArray]);
-                  result = ""; 
+                  result = "";
                 }
 
-                push(); 
+                push();
               })
               .catch((err) => {
                 console.error("Error reading the stream:", err);
@@ -118,7 +120,7 @@ const FileUpload = () => {
                 setLoading(false);
               });
           }
-          push(); 
+          push();
         },
       });
 
@@ -127,6 +129,33 @@ const FileUpload = () => {
       console.error("File upload failed:", err);
       setError(err.message || "An error occurred while processing the file.");
       setLoading(false);
+    }
+  };
+
+  const save = async () => {
+    try {
+      const Qa = qaPairs.slice(0, 10);
+
+      console.log("Split QA Pairs:", Qa);
+
+      const res = await fetch("http://127.0.0.1:5000/save-qa", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(Qa),
+      });
+      if (!res.ok) {
+        const errorData = await res.json();
+        setError(errorData.error || "An unknown error occurred.");
+        return;
+      }
+
+      const data = await res.json();
+      console.log("Data saved successfully:", data);
+    } catch (err) {
+      console.error("Failed to save data:", err);
+      setError(err.message || "An error occurred while saving the data.");
     }
   };
 
@@ -273,6 +302,47 @@ const FileUpload = () => {
       {loading && (
         <p style={{ textAlign: "center", color: "#777" }}>Loading...</p>
       )}
+
+      {qaPairs && qaPairs.length >= 10 && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            marginTop: "20px",
+          }}
+        >
+          <button
+            style={{
+              padding: "10px 20px",
+              backgroundColor: "#4CAF50",
+              color: "white",
+              border: "none",
+              cursor: "pointer",
+            }}
+            onClick={save}
+          >
+            Save Question
+          </button>
+        </div>
+      )}
+
+      {loadQa && <LoadQa />}  
+
+      <button
+        style={{
+          padding: "10px 20px",
+          backgroundColor: "#4CAF50",
+          color: "white",
+          border: "none",
+          cursor: "pointer",
+          marginTop: "20px",
+        }}
+        onClick={() => {
+          setLoadQa(!loadQa);
+        }}
+      >
+        load questions
+      </button>
     </div>
   );
 };
