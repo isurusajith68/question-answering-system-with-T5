@@ -341,7 +341,9 @@ const FileUpload = () => {
           setLoadQa(!loadQa);
         }}
       >
-        load questions
+       {
+          loadQa ? "Hide QA" : "Load QA"
+       }
       </button>
     </div>
   );

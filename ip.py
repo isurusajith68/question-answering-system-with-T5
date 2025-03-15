@@ -11,6 +11,7 @@ from prompts import get_mcq_prompt
 from groq import Groq
 from dotenv import load_dotenv
 from pymongo import MongoClient
+import random
 client = MongoClient("mongodb://localhost:27017/") 
 db = client["qa_database"]
 collection = db["qa_collection"]
@@ -244,11 +245,12 @@ def generate_qa_save():
 @app.route("/get-qa", methods=["GET"])
 def get_qa():
     try:
-        data = list(collection.find({}, {"_id": 0}))
+        data = list(collection.aggregate([{"$sample": {"size": 10}}]))
+        for item in data:
+            item.pop("_id", None)
         return jsonify(data), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    
 
 
 @app.route("/test-groq", methods=["GET"])

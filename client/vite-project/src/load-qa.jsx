@@ -45,30 +45,40 @@ const LoadQa = () => {
     setScore((correctCount / questions.length) * 100);
   };
 
+  console.log("Questions:", questions);
+
   if (questions.length === 0) {
     return <div className="text-center text-lg font-bold p-5">Loading...</div>;
   }
 
   const currentQuestion = questions[currentIndex];
 
+
   return (
     <div className="max-w-xl mx-auto p-6 border rounded-lg shadow-lg bg-yellow-400">
       {score === null ? (
         <>
-          <h2 className="text-xl font-bold mb-4 text-center">
-            {currentQuestion.question}
+          <h2 className="text-xl font-bold mb-4 ">
+            {currentIndex + 1}.{currentQuestion.question}
           </h2>
           <ul>
             {currentQuestion.options.map((option, index) => (
               <li
                 key={index}
-                className={`p-3 border rounded my-2 cursor-pointer transition duration-300 text-center ${
+                className={`p-3 border rounded my-2 cursor-pointer transition duration-300  ${
                   selectedAnswers[currentIndex] === index
                     ? "bg-blue-400 text-white"
                     : "bg-gray-200"
                 }`}
                 onClick={() => handleSelect(index)}
               >
+                <span
+                  className={`mr-2 ${
+                    selectedAnswers[currentIndex] === index
+                      ? "text-white"
+                      : "text-gray-500"
+                  }`}
+                > {index + 1}.</span>
                 {option}
               </li>
             ))}
@@ -83,6 +93,12 @@ const LoadQa = () => {
             >
               Previous
             </button>
+            <div className={`text-lg font-bold text-green-500`}>
+              Question
+              <span className="ml-2">
+                {currentIndex + 1}/{questions.length}
+              </span>
+            </div>
             {currentIndex < questions.length - 1 ? (
               <button
                 onClick={handleNext}
