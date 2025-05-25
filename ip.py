@@ -2,8 +2,8 @@ import os
 import uuid
 import torch
 import json
-from flask import Flask, request, jsonify, Response, stream_with_context
-from flask_cors import CORS
+from flask import Flask, request, jsonify, Response, stream_with_context, make_response
+from flask_cors import CORS, cross_origin
 from transformers import T5ForConditionalGeneration, T5Tokenizer
 import pdfplumber
 from ollama import chat
@@ -12,511 +12,590 @@ from groq import Groq
 from dotenv import load_dotenv
 from pymongo import MongoClient
 import random
-from bson import ObjectId, json_util  # Import for ObjectId serialization
+from bson import ObjectId, json_util
 import datetime
 import traceback
 import logging
+from functools import wraps
+from typing import Optional, Dict, Any, List
+import asyncio
+import time
 
-# MongoDB Configuration
-client = MongoClient("mongodb+srv://edusmart:13579@edu-smart.s7iq2.mongodb.net")
-db = client["myDatabase"]
-collection = db["qa_collection"]
-answer_collection = db['answer_collection']
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
+# Load environment variables
 load_dotenv()
-api_key = os.environ.get("Groq_Api_Key")
 
+# Configuration class for better organization
+class Config:
+    MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://edusmart:13579@edu-smart.s7iq2.mongodb.net")
+    GROQ_API_KEY = os.environ.get("Groq_Api_Key")
+    MAX_FILE_SIZE = 16 * 1024 * 1024  # 16MB
+    ALLOWED_EXTENSIONS = {'pdf'}
+    UPLOAD_FOLDER = './temp_uploads'
+    
+    # Model configuration
+    MAX_CONTEXT_LENGTH = 2048
+    DEFAULT_MAX_TOKENS = 1024
+    DEFAULT_TEMPERATURE = 0.7
+
+# Initialize Flask app
 app = Flask(__name__)
-CORS(app)
 
-model = T5ForConditionalGeneration.from_pretrained("./t5-qna")
-tokenizer = T5Tokenizer.from_pretrained("./t5-qna")
-
-client = Groq(
-    api_key=os.environ.get("Groq_Api_Key"),  # Fixed: use the environment variable name directly
+# Configure CORS with more permissive settings for development
+CORS(app, 
+     origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000", "http://127.0.0.1:3000"],
+     allow_headers=["Content-Type", "Authorization", "Accept"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     supports_credentials=True,
+     expose_headers=["Content-Disposition"]
 )
 
+# Simplified CORS handling - remove the conflicting after_request decorator
+@app.after_request
+def after_request(response):
+    # Allow requests from your frontend origins
+    origin = request.headers.get('Origin')
+    allowed_origins = ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000', 'http://127.0.0.1:3000']
+    
+    if origin in allowed_origins:
+        response.headers['Access-Control-Allow-Origin'] = origin
+    
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,Accept'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    response.headers['Access-Control-Allow-Credentials'] = 'true'
+    
+    return response
 
-def predict_using_llama_api_v1(chunk, question):
+app.config.from_object(Config)
+
+# Ensure upload directory exists
+os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)
+
+# Database connection with error handling
+try:
+    client = MongoClient(Config.MONGO_URI, serverSelectionTimeoutMS=5000)
+    client.server_info()  # Test connection
+    db = client["myDatabase"]
+    collection = db["qa_collection"]
+    answer_collection = db['answer_collection']
+    logger.info("Database connection established successfully")
+except Exception as e:
+    logger.error(f"Database connection failed: {e}")
+    raise
+
+# Initialize models with error handling
+try:
+    model = T5ForConditionalGeneration.from_pretrained("./t5-qna")
+    tokenizer = T5Tokenizer.from_pretrained("./t5-qna")
+    logger.info("T5 model loaded successfully")
+except Exception as e:
+    logger.error(f"Failed to load T5 model: {e}")
+    model, tokenizer = None, None
+
+# Initialize Groq client
+groq_client = None
+if Config.GROQ_API_KEY:
     try:
-        messages = get_mcq_prompt(chunk, question)
-
-        completion = client.chat.completions.create(
-            model="llama3-70b-8192",
-            messages=messages,
-            temperature=1,
-            max_tokens=1024,
-            top_p=1,
-            stream=True,
-            stop=None,
-        )
-
-        response = ""
-        for chunk in completion:
-            content = chunk.choices[0].delta.content or ""
-            response += content
-
-        return response
-
+        groq_client = Groq(api_key=Config.GROQ_API_KEY)
+        logger.info("Groq client initialized successfully")
     except Exception as e:
-        return {"error": f"Error generating response: {str(e)}"}
+        logger.error(f"Failed to initialize Groq client: {e}")
 
+# Utility functions
+def allowed_file(filename: str) -> bool:
+    """Check if file extension is allowed."""
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in Config.ALLOWED_EXTENSIONS
 
-def predict_using_ollama(chunk, question):
-    try:
-        messages = get_mcq_prompt(chunk, question)
+def validate_file_size(file) -> bool:
+    """Validate file size."""
+    file.seek(0, os.SEEK_END)
+    size = file.tell()
+    file.seek(0)
+    return size <= Config.MAX_FILE_SIZE
 
-        stream = chat(model='llama2', messages=messages, stream=True)
-        response = ""
-        for chunk in stream:
-            content = chunk.get('message', {}).get('content', '')
-            if content:
-                response += content
-
+def error_handler(f):
+    """Decorator for consistent error handling."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
         try:
-            return json.loads(response)
-        except json.JSONDecodeError:
-            return {"error": "Invalid JSON response "}
+            return f(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"Error in {f.__name__}: {str(e)}", exc_info=True)
+            return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+    return decorated_function
 
-    except Exception as e:
-        return {"error": f"Error generating : {str(e)}"}
+def validate_request_data(required_fields: List[str], data: Dict[str, Any]) -> Optional[str]:
+    """Validate required fields in request data."""
+    missing_fields = [field for field in required_fields if field not in data or not data[field]]
+    if missing_fields:
+        return f"Missing required fields: {', '.join(missing_fields)}"
+    return None
 
-
-def extract_text_from_pdf(pdf_path):
+# Improved text processing functions
+def extract_text_from_pdf(pdf_path: str) -> str:
+    """Extract text from PDF with improved error handling."""
     try:
         text = ""
         with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
-        return text
+            for page_num, page in enumerate(pdf.pages, 1):
+                try:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += f"\n--- Page {page_num} ---\n{page_text}\n"
+                except Exception as e:
+                    logger.warning(f"Failed to extract text from page {page_num}: {e}")
+                    continue
+        
+        if not text.strip():
+            raise ValueError("No readable text found in PDF")
+        
+        return text.strip()
     except Exception as e:
-        print(f"Error extracting text from PDF: {str(e)}")
+        logger.error(f"Error extracting text from PDF: {e}")
         raise
 
-
-def generate_questions(chunk, model, tokenizer):
-    try:
-        input_text = f"Given the following text, generate a concise and relevant question: {chunk}"
-        inputs = tokenizer(input_text, return_tensors="pt", padding=True, truncation=True)
-
-        with torch.no_grad():
-            outputs = model.generate(inputs["input_ids"], max_length=150, num_beams=5, early_stopping=True)
-
-        question = tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-        if not question or question.lower() in chunk.lower():
-            question = "Could not generate a relevant question."
-
-        return question
-    except Exception as e:
-        print(f"Error generating questions: {str(e)}")
-        raise
-
-
-def predict(context, query, model, tokenizer):
-    try:
-        input_text = f"Given the context: {context}, and the question: {query}, generate a precise and relevant answer."
-        inputs = tokenizer(input_text, return_tensors="pt", padding=True, truncation=True)
-
-        with torch.no_grad():
-            outputs = model.generate(inputs["input_ids"], max_length=150, num_beams=8, early_stopping=True)
-
-        answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-        if answer.lower() == query.lower() or not answer:
-            answer = "The answer is unclear, please try again."
-
-        return answer
-    except Exception as e:
-        print(f"Error predicting answer: {str(e)}")
-        raise
-
-
-def split_text_into_chunks(text, max_context_length):
-    # Try splitting by double newlines (paragraphs)
-    paragraphs = text.split('\n\n')
+def split_text_into_chunks(text: str, max_length: int = Config.MAX_CONTEXT_LENGTH) -> List[str]:
+    """Improved text chunking with better boundary detection."""
+    if len(text) <= max_length:
+        return [text]
+    
+    # Try splitting by paragraphs first
+    paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
     chunks = []
     current_chunk = ""
-
+    
     for para in paragraphs:
-        para = para.strip()
-        if not para:
-            continue
-
-        if len(current_chunk) + len(para) + 2 <= max_context_length:
-            current_chunk += para + "\n\n"
+        # If single paragraph is too long, split by sentences
+        if len(para) > max_length:
+            sentences = [s.strip() + '.' for s in para.split('.') if s.strip()]
+            for sentence in sentences:
+                if len(current_chunk) + len(sentence) + 2 <= max_length:
+                    current_chunk += sentence + " "
+                else:
+                    if current_chunk:
+                        chunks.append(current_chunk.strip())
+                    current_chunk = sentence + " "
         else:
-            chunks.append(current_chunk.strip())
-            current_chunk = para + "\n\n"
-
+            if len(current_chunk) + len(para) + 2 <= max_length:
+                current_chunk += para + "\n\n"
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                current_chunk = para + "\n\n"
+    
     if current_chunk:
         chunks.append(current_chunk.strip())
-
-    # Fallback to character chunking if no paragraph breaks found
+    
+    # Fallback to character chunking if needed
     if not chunks:
-        chunks = [text[i:i + max_context_length] for i in range(0, len(text), max_context_length)]
-
+        chunks = [text[i:i + max_length] for i in range(0, len(text), max_length)]
+    
     return chunks
 
-
-def process_pdf_and_generate_questions_with_context_stream(pdf_path, model, tokenizer, noOfQuestions, max_context_length=2048):
-    try:
-        text = extract_text_from_pdf(pdf_path)
-
-        if not text:
-            raise ValueError("No text extracted from the PDF. The file may be empty or unsupported.")
-
-        chunks = split_text_into_chunks(text, max_context_length)
-        
-        # Fixed: Ensure we don't exceed available chunks and limit by noOfQuestions
-        max_chunks = min(len(chunks), noOfQuestions)
-        
-        for i in range(max_chunks):  # Changed: Use range(max_chunks) instead of enumerate
-            chunk = chunks[i]
-            question = generate_questions(chunk, model, tokenizer)
-            answer = predict(chunk, question, model, tokenizer)
-            print(f"Processing question {i+1}/{max_chunks}: {question}")
-            refined_answer = predict_using_llama_api_v1(chunk, question)
-            yield refined_answer
-
-    except Exception as e:
-        print(f"Error processing PDF and generating QA: {e}")
-        yield {"error": str(e)}
-
-
-@app.route("/generate-qa", methods=["POST"])
-def generate_qa():
-    file_path = None
-
-    if "file" not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
-
-    file = request.files["file"]
-    noOfQuestions = request.form.get("noOfQuestions")
-    print(f"Number of questions requested: {noOfQuestions}")  # Enhanced logging
+def generate_questions_t5(chunk: str, model, tokenizer) -> str:
+    """Generate questions using T5 model with improved prompting."""
+    if not model or not tokenizer:
+        raise ValueError("T5 model not available")
     
     try:
-        noOfQuestions = int(noOfQuestions)
-        if noOfQuestions <= 0:
-            return jsonify({"error": "Number of questions must be positive"}), 400
+        input_text = f"Generate a clear, specific question based on this text: {chunk[:1000]}"
+        inputs = tokenizer(
+            input_text, 
+            return_tensors="pt", 
+            padding=True, 
+            truncation=True,
+            max_length=512
+        )
+        
+        with torch.no_grad():
+            outputs = model.generate(
+                inputs["input_ids"], 
+                max_length=100,
+                num_beams=5, 
+                early_stopping=True,
+                temperature=0.7,
+                do_sample=True
+            )
+        
+        question = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        
+        # Validate generated question
+        if not question or len(question.strip()) < 10:
+            return "Unable to generate a relevant question from this content."
+        
+        return question.strip()
+    except Exception as e:
+        logger.error(f"Error generating question with T5: {e}")
+        return "Error generating question."
+
+def predict_answer_t5(context: str, query: str, model, tokenizer) -> str:
+    """Generate answers using T5 model with improved prompting."""
+    if not model or not tokenizer:
+        raise ValueError("T5 model not available")
+    
+    try:
+        input_text = f"Context: {context[:1000]}\nQuestion: {query}\nProvide a concise, accurate answer:"
+        inputs = tokenizer(
+            input_text, 
+            return_tensors="pt", 
+            padding=True, 
+            truncation=True,
+            max_length=512
+        )
+        
+        with torch.no_grad():
+            outputs = model.generate(
+                inputs["input_ids"], 
+                max_length=150,
+                num_beams=5, 
+                early_stopping=True,
+                temperature=0.3
+            )
+        
+        answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        
+        if not answer or len(answer.strip()) < 5:
+            return "Unable to provide a clear answer."
+        
+        return answer.strip()
+    except Exception as e:
+        logger.error(f"Error generating answer with T5: {e}")
+        return "Error generating answer."
+
+def generate_mcq_with_groq(chunk: str, question: str) -> Dict[str, Any]:
+    """Generate MCQ using Groq API with improved error handling."""
+    if not groq_client:
+        raise ValueError("Groq client not available")
+    
+    try:
+        messages = get_mcq_prompt(chunk, question)
+        
+        completion = groq_client.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=messages,
+            temperature=Config.DEFAULT_TEMPERATURE,
+            max_tokens=Config.DEFAULT_MAX_TOKENS,
+            top_p=0.9,
+            stream=False  # Use non-streaming for better error handling
+        )
+        
+        response_content = completion.choices[0].message.content
+        
+        # Try to parse JSON response
+        try:
+            return json.loads(response_content)
+        except json.JSONDecodeError:
+            # If not JSON, return structured response
+            return {
+                "question": question,
+                "options": ["Option A", "Option B", "Option C", "Option D"],
+                "answer": 1,
+                "explanation": response_content[:200] + "..." if len(response_content) > 200 else response_content
+            }
+    
+    except Exception as e:
+        logger.error(f"Error generating MCQ with Groq: {e}")
+        return {
+            "question": question,
+            "options": ["Unable to generate options"],
+            "answer": 1,
+            "error": str(e)
+        }
+
+def process_pdf_and_generate_qa_stream(pdf_path: str, num_questions: int):
+    """Main processing function with streaming response."""
+    try:
+        # Extract text
+        text = extract_text_from_pdf(pdf_path)
+        chunks = split_text_into_chunks(text)
+        
+        # Limit chunks to requested number of questions
+        max_chunks = min(len(chunks), num_questions)
+        
+        for i in range(max_chunks):
+            try:
+                chunk = chunks[i]
+                
+                # Generate question using T5
+                question = generate_questions_t5(chunk, model, tokenizer)
+                
+                # Generate MCQ using Groq
+                mcq_data = generate_mcq_with_groq(chunk, question)
+                
+                # Add metadata
+                mcq_data.update({
+                    "chunk_id": i + 1,
+                    "total_chunks": max_chunks,
+                    "source_chunk": chunk[:100] + "..." if len(chunk) > 100 else chunk
+                })
+                
+                yield mcq_data
+                
+            except Exception as e:
+                logger.error(f"Error processing chunk {i+1}: {e}")
+                yield {
+                    "question": f"Error processing question {i+1}",
+                    "options": ["Error occurred"],
+                    "answer": 1,
+                    "error": str(e)
+                }
+    
+    except Exception as e:
+        logger.error(f"Error in PDF processing: {e}")
+        yield {"error": str(e)}
+
+# Add a simple OPTIONS handler for all routes
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        response = make_response()
+        origin = request.headers.get('Origin')
+        allowed_origins = ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000', 'http://127.0.0.1:3000']
+        
+        if origin in allowed_origins:
+            response.headers['Access-Control-Allow-Origin'] = origin
+        
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,Accept'
+        response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Max-Age'] = '86400'  # Cache preflight for 24 hours
+        
+        return response
+
+@app.route("/generate-qa", methods=["POST"])
+@error_handler
+def generate_qa():
+    """Generate QA pairs from uploaded PDF."""
+    
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+    
+    file = request.files["file"]
+    num_questions = request.form.get("noOfQuestions", 10)
+    
+    # Validate inputs
+    if not file or file.filename == "":
+        return jsonify({"error": "No file selected"}), 400
+    
+    if not allowed_file(file.filename):
+        return jsonify({"error": "Only PDF files are supported"}), 400
+    
+    if not validate_file_size(file):
+        return jsonify({"error": f"File too large. Maximum size: {Config.MAX_FILE_SIZE // (1024*1024)}MB"}), 400
+    
+    try:
+        num_questions = int(num_questions)
+        if num_questions <= 0 or num_questions > 50:
+            return jsonify({"error": "Number of questions must be between 1 and 50"}), 400
     except (ValueError, TypeError):
         return jsonify({"error": "Invalid number of questions"}), 400
-
-    if file.filename == "":
-        return jsonify({"error": "No selected file"}), 400
-
-    if not file.filename.endswith(".pdf"):
-        return jsonify({"error": "Only PDF files are supported"}), 400
-
+    
+    # Save file with unique name
     unique_filename = f"{uuid.uuid4().hex}.pdf"
-    file_path = os.path.join("./", unique_filename)
-
+    file_path = os.path.join(Config.UPLOAD_FOLDER, unique_filename)
+    
     try:
         file.save(file_path)
-
-        if not os.path.exists(file_path):
-            return jsonify({"error": "Failed to save file"}), 500
-
+        
         def generate():
             try:
                 question_count = 0
-                for qa_pair in process_pdf_and_generate_questions_with_context_stream(
-                    file_path, 
-                    model, 
-                    tokenizer,
-                    noOfQuestions=noOfQuestions
-                ):
+                for qa_pair in process_pdf_and_generate_qa_stream(file_path, num_questions):
                     question_count += 1
-                    print(f"Generated question {question_count}/{noOfQuestions}")  # Progress logging
+                    logger.info(f"Generated question {question_count}/{num_questions}")
                     yield f"data: {json.dumps(qa_pair)}\n\n"
-
+                
                 yield "data: {\"status\": \"complete\"}\n\n"
+            
             except Exception as e:
-                print(f"Error in generate function: {e}")
-                yield f"data: {{\"error\": \"Failed to process PDF and generate QA: {str(e)}\"}}\n\n"
+                logger.error(f"Error in generate function: {e}")
+                yield f"data: {{\"error\": \"Processing failed: {str(e)}\"}}\n\n"
+            
             finally:
-                if file_path and os.path.exists(file_path):
+                # Cleanup
+                if os.path.exists(file_path):
                     try:
                         os.remove(file_path)
-                        print(f"Cleaned up temporary file: {file_path}")
+                        logger.info(f"Cleaned up temporary file: {file_path}")
                     except Exception as cleanup_error:
-                        print(f"Error during cleanup: {cleanup_error}")
-
-        return Response(stream_with_context(generate()), mimetype="text/event-stream")
-
-    except Exception as e:
-        print(f"Error in /generate-qa route: {str(e)}")
-        return jsonify({"error": "An error occurred while processing the file."}), 500
-
-
-@app.route("/get-qa", methods=["GET"])
-def get_qa():
-    try:
-        # Fetch quizzes where completed is False, including necessary fields
-        questions = list(collection.find(
-            {"complete": False},
-            {"_id": 1, "name": 1, "time_limit": 1, "questions": 1, "complete": 1}
-        ))
-      
-        # Convert ObjectId to string and calculate question length
-        for question in questions:
-            question["_id"] = str(question["_id"])
-
-        return json_util.dumps(questions, default=json_util.default), 200
-    except Exception as e:
-        logging.exception(f"Error fetching quizzes: {e}")  # Log the traceback
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/get-qa/<quiz_id>", methods=["GET"])
-def get_single_qa(quiz_id):
-    try:
-        # Convert the provided quiz_id to ObjectId
-        quiz = collection.find_one(
-            {"_id": ObjectId(quiz_id)}, 
-            {"_id": 1, "name": 1, "time_limit": 1, "questions": 1, "answer": 1, "complete": 1}
+                        logger.error(f"Error during cleanup: {cleanup_error}")
+        
+        response = Response(
+            stream_with_context(generate()), 
+            mimetype="text/event-stream"
         )
-
-        if not quiz:
-            return jsonify({"error": "Quiz not found"}), 404
-
-        # Convert ObjectId to string
-        quiz["_id"] = str(quiz["_id"])
-        quiz["question_length"] = len(quiz["questions"]) if "questions" in quiz and isinstance(quiz["questions"], list) else 0
-
-        return jsonify(quiz), 200
+        
+        # Add CORS headers manually to the streaming response
+        origin = request.headers.get('Origin')
+        allowed_origins = ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000', 'http://127.0.0.1:3000']
+        
+        if origin in allowed_origins:
+            response.headers['Access-Control-Allow-Origin'] = origin
+        
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Cache-Control'] = 'no-cache'
+        response.headers['Connection'] = 'keep-alive'
+        
+        return response
+    
     except Exception as e:
-        print(f"Error fetching quiz: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-def save_exam_report(user_id, exam_id, score):
-    try:
-        timestamp = datetime.datetime.now()
-        report_data = {
-            "user_id": user_id,
-            "exam_id": exam_id,
-            "score": score,
-            "timestamp": timestamp
-        }
-        result = answer_collection.insert_one(report_data)  # Save answers to answer_collection
-        answer_id = str(result.inserted_id)  # Get the ID of the inserted answer
-
-        # Update the QA collection to set completed=True for the exam
-        collection.update_one(
-            {"_id": ObjectId(exam_id)},  # Find the exam by its ID
-            {"$set": {"complete": True}}  # Set the completed field to True
-        )
-
-        return answer_id  # Return the answer ID
-
-    except Exception as e:
-        print(f"Error saving exam report: {e}")
-        traceback.print_exc()
-        return None
-
-
-# Backend to retrieve Exam from the front end
-@app.route("/get-qa/<exam_id>", methods=["GET"])  # Note: This creates a duplicate route with get_single_qa
-def get_qa_by_id(exam_id):
-    try:
-        quiz = collection.find_one({"_id": ObjectId(exam_id)})  # Fixed: use collection instead of qa_collection
-
-        if quiz:
-            # Convert ObjectId to string for JSON serialization
-            quiz["_id"] = str(quiz["_id"])  # Convert to string
-            return jsonify(quiz), 200
-        else:
-            return jsonify({"error": "Quiz not found"}), 404
-    except Exception as e:
-        print(f"Error fetching quiz: {e}")
-        return jsonify({"error": str(e)}), 500
-
+        # Cleanup on error
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        raise
 
 @app.route("/save-qa", methods=["POST"])
-def generate_qa_save():
-    qa = request.json
-
-    if not isinstance(qa, dict):  # Check if it's a dictionary (single object)
-        return jsonify({"error": "Invalid format. Expected a single QA object."}), 400
-
-    # Add required fields with validation
+@error_handler
+def save_qa():
+    """Save generated QA data to database."""
+    
+    data = request.get_json()
+    
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    
+    # Validate required fields
     required_fields = ["name", "time_limit", "questions", "subject", "num_questions"]
-    for field in required_fields:
-        if field not in qa:
-            return jsonify({"error": f"Missing required field: {field}"}), 400
+    validation_error = validate_request_data(required_fields, data)
+    if validation_error:
+        return jsonify({"error": validation_error}), 400
+    
+    # Add metadata
+    data.update({
+        "complete": False,
+        "created_at": datetime.datetime.utcnow(),
+        "updated_at": datetime.datetime.utcnow(),
+        "version": "1.0"
+    })
+    
+    result = collection.insert_one(data)
+    
+    return jsonify({
+        "message": "QA saved successfully",
+        "inserted_id": str(result.inserted_id)
+    }), 201
 
-    # Add metadata fields
-    qa["complete"] = False
-    qa["created_at"] = datetime.datetime.now()
-    qa["updated_at"] = datetime.datetime.now()
+@app.route("/get-qa", methods=["GET"])
+@error_handler
+def get_qa():
+    """Get all incomplete quizzes."""
+    page = request.args.get('page', 1, type=int)
+    limit = request.args.get('limit', 10, type=int)
+    
+    skip = (page - 1) * limit
+    
+    quizzes = list(collection.find(
+        {"complete": False},
+        {"_id": 1, "name": 1, "time_limit": 1, "questions": 1, "subject": 1, "created_at": 1, "num_questions": 1}
+    ).skip(skip).limit(limit))
+    
+    # Convert ObjectId to string
+    for quiz in quizzes:
+        quiz["_id"] = str(quiz["_id"])
+        quiz["question_count"] = len(quiz.get("questions", []))
+    
+    total_count = collection.count_documents({"complete": False})
+    
+    return jsonify({
+        "quizzes": quizzes,
+        "total": total_count,
+        "page": page,
+        "limit": limit,
+        "total_pages": (total_count + limit - 1) // limit
+    }), 200
 
-    try:
-        result = collection.insert_one(qa)
-        return jsonify({
-            "message": "QA saved successfully", 
-            "inserted_id": str(result.inserted_id)
-        }), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
+@app.route("/get-qa/<quiz_id>", methods=["GET"])
+@error_handler
+def get_single_qa(quiz_id):
+    """Get single quiz by ID."""
+    if not ObjectId.is_valid(quiz_id):
+        return jsonify({"error": "Invalid quiz ID"}), 400
+    
+    quiz = collection.find_one({"_id": ObjectId(quiz_id)})
+    
+    if not quiz:
+        return jsonify({"error": "Quiz not found"}), 404
+    
+    quiz["_id"] = str(quiz["_id"])
+    quiz["question_length"] = len(quiz.get("questions", []))
+    
+    return jsonify(quiz), 200
 
 @app.route("/submit-exam", methods=["POST"])
+@error_handler
 def submit_exam():
-    try:
-        data = request.get_json()
+    """Submit exam results."""
+    data = request.get_json()
+    
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    
+    required_fields = ["userId", "examId", "score"]
+    validation_error = validate_request_data(required_fields, data)
+    if validation_error:
+        return jsonify({"error": validation_error}), 400
+    
+    user_id = data["userId"]
+    exam_id = data["examId"]
+    score = data["score"]
+    
+    if not ObjectId.is_valid(exam_id):
+        return jsonify({"error": "Invalid exam ID"}), 400
+    
+    # Save exam report
+    report_data = {
+        "user_id": user_id,
+        "exam_id": exam_id,
+        "score": score,
+        "timestamp": datetime.datetime.utcnow(),
+        "answers": data.get("answers", [])  # Store user answers if provided
+    }
+    
+    result = answer_collection.insert_one(report_data)
+    
+    # Mark exam as complete
+    collection.update_one(
+        {"_id": ObjectId(exam_id)},
+        {"$set": {"complete": True, "updated_at": datetime.datetime.utcnow()}}
+    )
+    
+    return jsonify({
+        "message": "Exam submitted successfully",
+        "report_id": str(result.inserted_id)
+    }), 200
 
-        if not data:
-            return jsonify({"error": "No data provided"}), 400
-
-        user_id = data.get("userId")
-        exam_id = data.get("examId")
-        score = data.get("score")
-        print("Received all the following data:", {user_id, exam_id, score})  # Check if they are correct
-
-        if not all([user_id, exam_id, score is not None]):  # Fixed: score could be 0
-            return jsonify({"error": "Missing required data"}), 400
-
-        # Save the report
-        report_id = save_exam_report(user_id, exam_id, score)
-        if report_id:
-            return jsonify({"message": "Exam submitted successfully!", "report_id": report_id}), 200
-        else:
-            return jsonify({"error": "Failed to save exam report"}), 500
-
-    except Exception as e:
-        print(f"Error processing submission: {e}")
-        traceback.print_exc()
-        return jsonify({"error": "Failed to process exam submission"}), 500
-
-
-# Helper function to serialize data
-def serialize_data(data):
-    try:
-        return json.dumps(data, default=json_util.default)
-    except Exception as e:
-        print(f"Error serializing data: {e}")
-        return None
-
-
-def get_exam_reports_for_user(user_id):  # Added missing function
-    try:
-        reports = list(answer_collection.find({"user_id": user_id}))
-        for report in reports:
-            report["_id"] = str(report["_id"])
-        return reports
-    except Exception as e:
-        print(f"Error fetching exam reports: {e}")
-        return None
-
-
-# API route to get exam reports
-@app.route("/get-exam-reports/<user_id>", methods=["GET"])
-def get_exam_reports(user_id):
-    reports = get_exam_reports_for_user(user_id)
-    if reports:
-        return jsonify(reports), 200
-    else:
-        return jsonify({"message": "No exam reports found for this user"}), 404
-
-
-@app.route("/test-groq", methods=["GET"])
-def test_groq():
-    try:
-        stream = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {
-                    "role": "user",
-                    "content": "how are you"
-                },
-                {
-                    "role": "assistant",
-                    "content": "I'm just a language model, so I don't have emotions or physical sensations like humans do. However, I'm functioning properly and ready to assist you with any questions or tasks you may have. How can I help you today?"
-                }
-            ],
-            temperature=1,
-            max_completion_tokens=1024,
-            top_p=1,
-            stream=True,
-            stop=None,
-        )
-
-        response_content = ""
-
-        for chunk in stream:
-            content = chunk.choices[0].delta.content or ""
-            response_content += content
-
-        return jsonify({"response": response_content}), 200
-    except Exception as e:
-        return jsonify({"error": f"Error generating response: {str(e)}"}), 500
-
-
-@app.route("/get-all-exams", methods=["GET"])
-def get_all_exams():
-    try:
-        # Fetch all exams from the collection where complete is False
-        exams = list(collection.find(
-            {"complete": False},  # Only get exams that haven't been completed
-            {
-                "_id": 1,
-                "name": 1,
-                "time_limit": 1,
-                "questions": 1,
-                "subject": 1,
-                "created_at": 1,
-                "num_questions": 1,
-                "complete": 1
-            }
-        ))
-        
-        # Format the exams data
-        formatted_exams = []
-        for exam in exams:
-            # Convert ObjectId to string and format the exam data
-            formatted_exam = {
-                "id": str(exam["_id"]),
-                "title": exam.get("name", "Untitled Exam"),
-                "duration": f"{exam.get('time_limit', 0)} minutes",
-                "questions": exam.get("num_questions", 0),  # Use num_questions field
-                "subject": exam.get("subject", "General"),
-                "date": exam.get("created_at", datetime.datetime.now()).strftime("%Y-%m-%d %I:%M %p")
-            }
-            formatted_exams.append(formatted_exam)
-
-        return jsonify(formatted_exams), 200
-    except Exception as e:
-        print(f"Error fetching exams: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-# Add a new endpoint to get a single exam by ID
-@app.route("/get-exam/<exam_id>", methods=["GET"])
-def get_exam_by_id(exam_id):
-    try:
-        exam = collection.find_one({"_id": ObjectId(exam_id)})
-        
-        if not exam:
-            return jsonify({"error": "Exam not found"}), 404
-
-        formatted_exam = {
-            "id": str(exam["_id"]),
-            "title": exam.get("name", "Untitled Exam"),
-            "duration": f"{exam.get('time_limit', 0)} minutes",
-            "questions": exam.get("num_questions", 0),
-            "subject": exam.get("subject", "General"),
-            "date": exam.get("created_at", datetime.datetime.now()).strftime("%Y-%m-%d %I:%M %p"),
-            "question_list": exam.get("questions", [])  # Include the actual questions
+@app.route("/health", methods=["GET"])
+def health_check():
+    """Health check endpoint."""
+    return jsonify({
+        "status": "healthy",
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "services": {
+            "database": "connected" if client else "disconnected",
+            "groq": "available" if groq_client else "unavailable",
+            "t5_model": "loaded" if model and tokenizer else "not_loaded"
         }
+    }), 200
 
-        return jsonify(formatted_exam), 200
-    except Exception as e:
-        print(f"Error fetching exam: {e}")
-        return jsonify({"error": str(e)}), 500
+# Error handlers
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({"error": "Endpoint not found"}), 404
 
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({"error": "Internal server error"}), 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5005)
+    app.run(
+        host="0.0.0.0", 
+        port=5005, 
+        debug=True,  # Enable debug for development
+        threaded=True
+    )
